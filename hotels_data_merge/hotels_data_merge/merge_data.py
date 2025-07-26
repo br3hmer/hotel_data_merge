@@ -12,7 +12,7 @@ ADDRESS_WORD_LIST = ['Address', 'address']
 CITY_WORD_LIST = ['City', 'city']
 COUNTRY_WORD_LIST = ['Country', 'country']
 POSTALCODE_WORD_LIST = ['PostalCode', 'postalcode']
-DESCRIPTION_WORD_LIST = ['Description', 'details']
+DESCRIPTION_WORD_LIST = ['Description', 'info', 'details']
 AMENITIES_WORD_LIST = ['Facilities', 'amenities']
 
 ROOM_AMENITIES_LIST = ["aircon", "bathtub", "coffee machine", "hair dryer", "iron", "kettle", "minibar", "tub", "tv"]
@@ -28,12 +28,10 @@ def get_cached_hotel_data(hotel_id_list, destination_id):
     if hotel_id_list:
         for hotel_id in hotel_id_list:
             if hotel_id in hotel_cache:
-                print("hit hotel_id cache")
                 hotel_data_list.append(hotel_cache[hotel_id])
                 non_cache_hotel_id_list.remove(hotel_id)
     else:
         if destination_id in hotel_cache:
-            print("hit destination_id cache")
             return hotel_cache[destination_id]
     
     merged_data = get_merged_hotel_data(non_cache_hotel_id_list, destination_id)
@@ -49,6 +47,19 @@ def get_cached_hotel_data(hotel_id_list, destination_id):
     return hotel_data_list
 
 # UTILITY FUNCTIONS
+def find_associated_field_among_possible_words(hotel, word_list):
+    """
+    Checks for multiple different strings that relates to an identical field
+    For example, [Id, hote_id, id] all relates to id
+    If not we need to do something like "hotel.get('Id', hotel.get('hotel_id', hotel.get('id')))""
+    """
+    for word in word_list:
+        if word in hotel.keys():
+            return hotel.get(word)
+
+    # Default empty string if word not found
+    return ''
+
 def dedup_amenities(amenities_list):
     """
     Keeps only similar strings that has whitespace in them
@@ -82,14 +93,15 @@ def normalize_hotel_fields(hotel):
     normalized_hotel['location'] = {
         'lat': find_associated_field_among_possible_words(hotel, LATITUDE_WORD_LIST),
         'lng': find_associated_field_among_possible_words(hotel, LONGITUDE_WORD_LIST),
-        'address': find_associated_field_among_possible_words(hotel, ADDRESS_WORD_LIST),
+        'address': find_associated_field_among_possible_words(hotel, ADDRESS_WORD_LIST) or
+                    find_associated_field_among_possible_words(hotel.get('location', {}), ADDRESS_WORD_LIST),
         'city': find_associated_field_among_possible_words(hotel, CITY_WORD_LIST),
         'country': find_associated_field_among_possible_words(hotel, COUNTRY_WORD_LIST),
         'postalCode': find_associated_field_among_possible_words(hotel, POSTALCODE_WORD_LIST),
     }
     
     # Normalize description
-    normalized_hotel['description'] = find_associated_field_among_possible_words(hotel, DESCRIPTION_WORD_LIST),
+    normalized_hotel['description'] = str(find_associated_field_among_possible_words(hotel, DESCRIPTION_WORD_LIST)).strip()
     
     # Normalize amenities
     normalized_hotel['amenities'] = {'room': [], 'general': []}
@@ -132,13 +144,16 @@ def do_merge(hotel_id, hotels):
     }
     hotel_names = []
     description_list = []
+    address_list = []
 
     for hotel in hotels:
         if hotel.get('name'):
             hotel_names.append(hotel.get('name')) 
 
         hotel_location = hotel.get('location', {})
-        for key in ['lat', 'lng', 'address', 'city', 'postalCode']:
+        if hotel_location.get('address'):
+            address_list.append(hotel_location.get('address'))
+        for key in ['lat', 'lng', 'city', 'postalCode']:
             if hotel_location.get(key) and not merged['location'][key]:
                 merged['location'][key] = hotel_location.get(key)
 
@@ -168,24 +183,12 @@ def do_merge(hotel_id, hotels):
 
     merged['name'] = max(hotel_names, key=len, default='')
     merged['description'] = max(description_list, key=len, default='')
+    merged['location']['address'] = max(address_list, key=len, default='')
     for category in ['general', 'room']:
         merged['amenities'][category] = sorted(list(set(merged['amenities'][category])))
     merged['booking_conditions'] = sorted(list(set(merged['booking_conditions'])))
     
     return merged
-
-def find_associated_field_among_possible_words(hotel, word_list):
-    """
-    Checks for multiple different strings that relates to an identical field
-    For example, [Id, hote_id, id] all relates to id
-    If not we need to do something like "hotel.get('Id', hotel.get('hotel_id', hotel.get('id')))""
-    """
-    for word in word_list:
-        if word in hotel.keys():
-            return hotel.get(word)
-
-    # Case where we do not find specific field string
-    return "FIELD_NOT_FOUND"
 
 def get_merged_hotel_data(hotel_id_list, destination_id):
     if not hotel_id_list and not destination_id:
@@ -223,9 +226,6 @@ def get_merged_hotel_data(hotel_id_list, destination_id):
             if hotel['destination_id'] == destination_id:
                 group_by_key = (hotel['id'], hotel['destination_id'])
                 grouped_hotels_dict[group_by_key].append(hotel)
-    
-    # for key,val in grouped_hotels_dict.items():
-    #     print(f"grouped_hotels_dict[{key}]: {val}")
 
     merged_hotels = []
     if hotel_id_list:
@@ -235,6 +235,4 @@ def get_merged_hotel_data(hotel_id_list, destination_id):
         for key,hotels in grouped_hotels_dict.items():
             merged_hotels.append(do_merge(hotel_id=key[0], hotels=hotels))
 
-    # for hotel in merged_hotels:
-    #     print(f"merged_hotels: {hotel}")
     return merged_hotels
