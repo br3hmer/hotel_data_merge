@@ -1,7 +1,7 @@
 import requests
 from collections import Counter, defaultdict
 
-def merge_hotel_data():
+def merge_hotel_data(hotel_id_list, destination_id):
     supplier_urls = [
         'https://5f2be0b4ffc88500167b85a0.mockapi.io/suppliers/acme',
         'https://5f2be0b4ffc88500167b85a0.mockapi.io/suppliers/patagonia',
@@ -12,15 +12,15 @@ def merge_hotel_data():
         normalized_hotel = {}
         # Handle different ID and name keys
         normalized_hotel['id'] = hotel.get('Id', hotel.get('hotel_id', hotel.get('id')))
-        normalized_hotel['destination_id'] = hotel.get('DestinationId', hotel.get('destination_id'))
-        normalized_hotel['name'] = hotel.get('Name', hotel.get('hotel_name'))
+        normalized_hotel['destination_id'] = hotel.get('DestinationId', hotel.get('destination_id', hotel.get('destination')))
+        normalized_hotel['name'] = hotel.get('Name', hotel.get('hotel_name', hotel.get('name')))
         
         # Normalize location
         location = hotel.get('location', {})
         normalized_hotel['location'] = {
             'lat': hotel.get('Latitude', location.get('lat')),
             'lng': hotel.get('Longitude', location.get('lng')),
-            'address': hotel.get('Address', location.get('address', '')),
+            'address': hotel.get('Address', hotel.get('address', location.get('address', ''))),
             'city': hotel.get('City', location.get('city', '')),
             'country': hotel.get('Country', location.get('country', '')),
             'postalCode': hotel.get('PostalCode', location.get('postalCode', ''))
@@ -33,7 +33,7 @@ def merge_hotel_data():
         normalized_hotel['amenities'] = {'room': [], 'general': []}
         facilities = hotel.get('Facilities', hotel.get('amenities', {}))
         if isinstance(facilities, list):
-            room_amenities_list = ["tv","coffee machine","kettle","hair dryer","iron", "aircon", "tub"]
+            room_amenities_list = ["aircon", "bathtub", "coffee machine", "hair dryer", "iron", "kettle", "minibar", "tub", "tv"]
 
             for facility in facilities:
                 facility = str(facility).lower()
@@ -48,8 +48,6 @@ def merge_hotel_data():
                 'room': facilities.get('room', [])
             }
 
-        print("pear")
-
         # Normalize images
         normalized_hotel['images'] = hotel.get('images', {'rooms': [], 'site': [], 'amenities': []})
         
@@ -59,18 +57,9 @@ def merge_hotel_data():
         return normalized_hotel
 
     def do_merge(hotel_id, hotels):
-        destination_ids = []
-
-        # Get most common destination_id if there is dirty data for same hotel_id
-        for hotel in hotels:
-            destination_ids.append(hotel['destination_id'])
-
-        destination_id_counts = Counter(destination_ids)
-        most_common_destination_id = [id for id, count in destination_id_counts.items() if count == max(destination_id_counts.values())]
-
         merged = {
             'id': hotel_id,
-            'destination_id': most_common_destination_id,
+            'destination_id': hotels[0].get('destination_id'),
             'name': '',
             'location': {'lat': None, 'lng': None, 'address': '', 'city': '', 'country': '', 'postalCode': ''},
             'description': '',
@@ -135,17 +124,31 @@ def merge_hotel_data():
         except requests.RequestException as e:
             print(f"Error fetching data from {url}: {e}")
             raise e
-    
+
     # Group by hotel ID
-    hotels_by_id_dict = defaultdict(list)
-    for hotel in hotel_list:
-        hotels_by_id_dict[hotel['id']].append(hotel)
+    grouped_hotels_dict = defaultdict(list)
+    if hotel_id_list:
+        for hotel in hotel_list:
+            if hotel['id'] in hotel_id_list:
+                grouped_hotels_dict[hotel['id']].append(hotel)
+    # Group by tuple of (hotel_id, destination_id)
+    else:
+        for hotel in hotel_list:
+            if hotel['destination_id'] == destination_id:
+                group_by_key = (hotel['id'], hotel['destination_id'])
+                grouped_hotels_dict[group_by_key].append(hotel)
     
-    # for key,val in hotels_by_id_dict.items():
-    #     print(f"hotels_by_id_dict[{key}]: {val}")
+    for key,val in grouped_hotels_dict.items():
+        print(f"grouped_hotels_dict[{key}]: {val}")
 
     merged_hotels = []
-    for hotel_id, hotels in hotels_by_id_dict.items():
-        merged_hotels.append(do_merge(hotel_id, hotels))
-    
+    if hotel_id_list:
+        for key, hotels in grouped_hotels_dict.items():
+            merged_hotels.append(do_merge(hotel_id=key, hotels=hotels))
+    else:
+        for key,hotels in grouped_hotels_dict.items():
+            merged_hotels.append(do_merge(hotel_id=key[0], hotels=hotels))
+
+    for hotel in merged_hotels:
+        print(f"merged_hotels: {hotel}")
     return merged_hotels

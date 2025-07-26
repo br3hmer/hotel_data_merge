@@ -18,7 +18,7 @@ def hotels_api(request):
         if not hotels and destination is None:
             return HttpResponseBadRequest('Either "hotels" or "destination" parameter is required')
 
-        result = merge_hotel_data()
+        result = merge_hotel_data(hotels, destination)
         return JsonResponse(result, safe=False)
     except json.JSONDecodeError as e:
         return HttpResponseBadRequest(f'Invalid JSON payload: {str(e)}')
