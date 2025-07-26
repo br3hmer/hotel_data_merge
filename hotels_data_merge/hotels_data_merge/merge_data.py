@@ -1,6 +1,20 @@
 import requests
 from collections import Counter, defaultdict
 
+ID_WORD_LIST = ['Id', 'hotel_id', 'id']
+DESTINATION_ID_WORD_LIST = ['DestinationId', 'destination_id', 'destination']
+HOTEL_NAME_WORD_LIST = ['Name', 'hotel_name', 'name']
+LATITUDE_WORD_LIST = ['Latitude', 'lat']
+LONGITUDE_WORD_LIST = ['Longitude', 'lng']
+ADDRESS_WORD_LIST = ['Address', 'address']
+CITY_WORD_LIST = ['City', 'city']
+COUNTRY_WORD_LIST = ['Country', 'country']
+POSTALCODE_WORD_LIST = ['PostalCode', 'postalcode']
+DESCRIPTION_WORD_LIST = ['Description', 'details']
+AMENITIES_WORD_LIST = ['Facilities', 'amenities']
+
+ROOM_AMENITIES_LIST = ["aircon", "bathtub", "coffee machine", "hair dryer", "iron", "kettle", "minibar", "tub", "tv"]
+
 def merge_hotel_data(hotel_id_list, destination_id):
     supplier_urls = [
         'https://5f2be0b4ffc88500167b85a0.mockapi.io/suppliers/acme',
@@ -8,37 +22,68 @@ def merge_hotel_data(hotel_id_list, destination_id):
         'https://5f2be0b4ffc88500167b85a0.mockapi.io/suppliers/paperflies'
     ]
 
-    def normalize_fields(hotel):
+    def dedup_amenities(amenities_list):
+        """
+        Keeps only similar strings that has whitespace in them
+        For example, keeps "Business Center" and removes "BusinessCenter"
+        """
+        normalized_map = {}
+        for amenity_str in amenities_list:
+            normalized = amenity_str.replace(" ", "").lower()
+            if normalized not in normalized_map:
+                normalized_map[normalized] = amenity_str
+            else:
+                # Prefer the version with a space
+                current = normalized_map[normalized]
+                if " " in amenity_str and " " not in current:
+                    # replace with spaced version
+                    normalized_map[normalized] = amenity_str 
+
+        return list(normalized_map.values())
+
+    def find_associated_field_among_possible_words(hotel, word_list):
+        """
+        Checks for multiple different strings that relates to an identical field
+        For example, [Id, hote_id, id] all relates to id
+        If not we need to do something like "hotel.get('Id', hotel.get('hotel_id', hotel.get('id')))""
+        """
+        for word in word_list:
+            if word in hotel.keys():
+                return hotel.get(word)
+
+        # Case where we do not find specific field string
+        return "FIELD_NOT_FOUND"
+
+    def normalize_hotel_fields(hotel):
+        """
+        Normalize fields for hotel data data retrieved from URLS
+        """
         normalized_hotel = {}
-        # Handle different ID and name keys
-        normalized_hotel['id'] = hotel.get('Id', hotel.get('hotel_id', hotel.get('id')))
-        normalized_hotel['destination_id'] = hotel.get('DestinationId', hotel.get('destination_id', hotel.get('destination')))
-        normalized_hotel['name'] = hotel.get('Name', hotel.get('hotel_name', hotel.get('name')))
+        normalized_hotel['id'] = find_associated_field_among_possible_words(hotel, ID_WORD_LIST)
+        normalized_hotel['destination_id'] = find_associated_field_among_possible_words(hotel, DESTINATION_ID_WORD_LIST)
+        normalized_hotel['name'] = find_associated_field_among_possible_words(hotel, HOTEL_NAME_WORD_LIST)
         
         # Normalize location
         location = hotel.get('location', {})
         normalized_hotel['location'] = {
-            'lat': hotel.get('Latitude', location.get('lat')),
-            'lng': hotel.get('Longitude', location.get('lng')),
-            'address': hotel.get('Address', hotel.get('address', location.get('address', ''))),
-            'city': hotel.get('City', location.get('city', '')),
-            'country': hotel.get('Country', location.get('country', '')),
-            'postalCode': hotel.get('PostalCode', location.get('postalCode', ''))
+            'lat': find_associated_field_among_possible_words(hotel, LATITUDE_WORD_LIST),
+            'lng': find_associated_field_among_possible_words(hotel, LONGITUDE_WORD_LIST),
+            'address': find_associated_field_among_possible_words(hotel, ADDRESS_WORD_LIST),
+            'city': find_associated_field_among_possible_words(hotel, CITY_WORD_LIST),
+            'country': find_associated_field_among_possible_words(hotel, COUNTRY_WORD_LIST),
+            'postalCode': find_associated_field_among_possible_words(hotel, POSTALCODE_WORD_LIST),
         }
         
         # Normalize description
-        normalized_hotel['description'] = hotel.get('Description', hotel.get('details', ''))
+        normalized_hotel['description'] = find_associated_field_among_possible_words(hotel, DESCRIPTION_WORD_LIST),
         
         # Normalize amenities
         normalized_hotel['amenities'] = {'room': [], 'general': []}
-        facilities = hotel.get('Facilities', hotel.get('amenities', {}))
+        facilities = find_associated_field_among_possible_words(hotel, AMENITIES_WORD_LIST)
         if isinstance(facilities, list):
-            room_amenities_list = ["aircon", "bathtub", "coffee machine", "hair dryer", "iron", "kettle", "minibar", "tub", "tv"]
-
             for facility in facilities:
                 facility = str(facility).lower()
-
-                if facility in room_amenities_list:
+                if facility in ROOM_AMENITIES_LIST:
                     normalized_hotel['amenities']['room'].append(facility)
                 else:
                     normalized_hotel['amenities']['general'].append(facility)
@@ -57,6 +102,9 @@ def merge_hotel_data(hotel_id_list, destination_id):
         return normalized_hotel
 
     def do_merge(hotel_id, hotels):
+        """
+        Core merging logic is here, merge data across hotels with identical hotel_id
+        """
         merged = {
             'id': hotel_id,
             'destination_id': hotels[0].get('destination_id'),
@@ -67,7 +115,6 @@ def merge_hotel_data(hotel_id_list, destination_id):
             'images': {'rooms': [], 'site': [], 'amenities': []},
             'booking_conditions': []
         }
-        
         hotel_names = []
         description_list = []
 
@@ -89,6 +136,7 @@ def merge_hotel_data(hotel_id_list, destination_id):
             amenities = hotel.get('amenities', {})
             for category in ['general', 'room']:
                 merged['amenities'][category].extend([str(a).strip().lower() for a in amenities.get(category, [])])
+                merged['amenities'][category] = dedup_amenities(merged['amenities'][category])
 
             images = hotel.get('images', {})
             for category in ['rooms', 'site', 'amenities']:
@@ -118,12 +166,12 @@ def merge_hotel_data(hotel_id_list, destination_id):
             response.raise_for_status() 
             hotels = response.json()
 
-            # Normalize field names
+            # Normalize hotel field names
             for hotel in hotels:
-                hotel_list.append(normalize_fields(hotel))
+                hotel_list.append(normalize_hotel_fields(hotel))
         except requests.RequestException as e:
             print(f"Error fetching data from {url}: {e}")
-            raise e
+            continue
 
     # Group by hotel ID
     grouped_hotels_dict = defaultdict(list)
@@ -138,8 +186,8 @@ def merge_hotel_data(hotel_id_list, destination_id):
                 group_by_key = (hotel['id'], hotel['destination_id'])
                 grouped_hotels_dict[group_by_key].append(hotel)
     
-    for key,val in grouped_hotels_dict.items():
-        print(f"grouped_hotels_dict[{key}]: {val}")
+    # for key,val in grouped_hotels_dict.items():
+    #     print(f"grouped_hotels_dict[{key}]: {val}")
 
     merged_hotels = []
     if hotel_id_list:
@@ -149,6 +197,6 @@ def merge_hotel_data(hotel_id_list, destination_id):
         for key,hotels in grouped_hotels_dict.items():
             merged_hotels.append(do_merge(hotel_id=key[0], hotels=hotels))
 
-    for hotel in merged_hotels:
-        print(f"merged_hotels: {hotel}")
+    # for hotel in merged_hotels:
+    #     print(f"merged_hotels: {hotel}")
     return merged_hotels
