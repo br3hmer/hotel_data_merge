@@ -30,8 +30,7 @@ def get_cached_hotel_data(hotel_id_list, destination_id):
             if hotel_id in hotel_cache:
                 hotel_data_list.append(hotel_cache[hotel_id])
                 non_cache_hotel_id_list.remove(hotel_id)
-    else:
-        if destination_id in hotel_cache:
+    elif destination_id in hotel_cache:
             return hotel_cache[destination_id]
     
     merged_data = get_merged_hotel_data(non_cache_hotel_id_list, destination_id)
